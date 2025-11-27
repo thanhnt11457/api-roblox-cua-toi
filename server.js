@@ -4,63 +4,83 @@ const app = express();
 const port = process.env.PORT || 3000;
 
 app.get('/', (req, res) => {
-    res.send('Roblox Proxy Server is Running! (Fixed ID Version)');
+    res.send('Hybrid Scanner (Gamepass + Clothing) is Running!');
 });
 
 app.get('/api/gamepasses/:userId', async (req, res) => {
     const userId = req.params.userId;
-    console.log(`--- BAT DAU TIM KIEM USER ID: ${userId} ---`);
+    console.log(`\n========== BAT DAU QUET USER: ${userId} ==========`);
     
-    try {
-        // 1. Lấy danh sách Game
-        const gamesUrl = `https://games.roblox.com/v2/users/${userId}/games?accessFilter=Public&limit=50`;
-        const gamesResponse = await axios.get(gamesUrl);
-        const games = gamesResponse.data.data;
+    let allItems = [];
 
-        if (!games || games.length === 0) {
-            console.log("=> User nay khong co game Public nao.");
-            return res.json({ success: true, count: 0, data: [], message: "No public games found" });
+    try {
+        // --- PHẦN 1: QUÉT GAMEPASS (Trong các Game Public) ---
+        console.log("1. Dang quet Gamepass...");
+        try {
+            const gamesUrl = `https://games.roblox.com/v2/users/${userId}/games?accessFilter=Public&limit=50`;
+            const gamesResponse = await axios.get(gamesUrl);
+            const games = gamesResponse.data.data || [];
+
+            console.log(`   -> Tim thay ${games.length} game Public.`);
+
+            const gamePromises = games.map(async (game) => {
+                try {
+                    // Lưu ý: Dùng game.id (Universe ID)
+                    const passUrl = `https://games.roblox.com/v1/games/${game.id}/game-passes?limit=100`;
+                    const passResponse = await axios.get(passUrl);
+                    const passes = passResponse.data.data || [];
+                    
+                    if (passes.length > 0) console.log(`      + Game [${game.name}] co ${passes.length} passes.`);
+                    
+                    return passes.map(p => ({
+                        id: p.id,
+                        name: "[PASS] " + p.name, // Đánh dấu đây là Gamepass
+                        price: p.price,
+                        imageId: p.id,
+                        type: "Gamepass"
+                    }));
+                } catch (e) { return []; }
+            });
+
+            const gamepassResults = await Promise.all(gamePromises);
+            gamepassResults.forEach(group => allItems = allItems.concat(group));
+
+        } catch (err) {
+            console.log("   ! Loi phan quet Gamepass: " + err.message);
         }
 
-        console.log(`=> Tim thay ${games.length} game. Bat dau quet...`);
-        let allGamepasses = [];
+        // --- PHẦN 2: QUÉT QUẦN ÁO (T-Shirt, Shirt) ---
+        // Đề phòng trường hợp bạn tạo nhầm Gamepass thành Áo, hoặc Gamepass bị ẩn
+        console.log("2. Dang quet T-Shirt/Shirt tren Catalog...");
+        try {
+            // Tìm đồ do User tạo (Category 3 = Clothing)
+            const clothingUrl = `https://catalog.roblox.com/v1/search/items?category=Clothing&creatorTargetId=${userId}&limit=100&sortType=RecentlyCreated`;
+            const clothingResponse = await axios.get(clothingUrl);
+            const clothes = clothingResponse.data.data || [];
 
-        // 2. Duyệt từng Game
-        const promises = games.map(async (game) => {
-            try {
-                // --- SỬA LỖI Ở ĐÂY ---
-                // Dùng game.id (Universe ID) thay vì game.rootPlaceId
-                const passUrl = `https://games.roblox.com/v1/games/${game.id}/game-passes?limit=100`;
-                
-                const passResponse = await axios.get(passUrl);
-                const passes = passResponse.data.data;
-                
-                if (passes.length > 0) {
-                    console.log(`   > Game: ${game.name} - Tim thay ${passes.length} passes`);
-                }
+            console.log(`   -> Tim thay ${clothes.length} mon do Clothing.`);
 
-                return passes.map(p => ({
-                    id: p.id,
-                    name: p.name,
-                    price: p.price,
-                    imageId: p.id
-                }));
-            } catch (err) {
-                return [];
-            }
-        });
+            const validClothes = clothes.map(c => ({
+                id: c.id,
+                name: "[ITEM] " + c.name, // Đánh dấu đây là Clothing
+                price: c.price,
+                imageId: c.id, // Với Clothing, ID sản phẩm dùng làm ảnh được luôn
+                type: "Clothing" 
+            }));
 
-        const results = await Promise.all(promises);
+            allItems = allItems.concat(validClothes);
+
+        } catch (err) {
+            console.log("   ! Loi phan quet Clothing: " + err.message);
+        }
+
+        // --- TỔNG KẾT ---
+        // Lọc những món có giá bán > 0
+        const forSaleItems = allItems.filter(p => p.price && p.price > 0);
         
-        results.forEach(group => {
-            allGamepasses = allGamepasses.concat(group);
-        });
+        console.log(`=> TONG KET: Tim thay tong cong ${forSaleItems.length} vat pham (Gamepass + Ao).`);
 
-        // 3. Lọc gamepass có giá bán
-        const forSalePasses = allGamepasses.filter(p => p.price && p.price > 0);
-        console.log(`=> KET QUA CUOI CUNG: Tim thay ${forSalePasses.length} gamepass.`);
-
-        res.json({ success: true, count: forSalePasses.length, data: forSalePasses });
+        res.json({ success: true, count: forSaleItems.length, data: forSaleItems });
 
     } catch (error) {
         console.error("LOI SERVER:", error.message);
