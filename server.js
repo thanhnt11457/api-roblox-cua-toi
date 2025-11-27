@@ -4,92 +4,41 @@ const app = express();
 const port = process.env.PORT || 3000;
 
 app.get('/', (req, res) => {
-    res.send('SERVER DEBUG MODE: EXTREME');
+    res.send('Server Running: T-Shirt Scanner ONLY');
 });
 
+// API chỉ tìm kiếm T-Shirt/Clothing (ít bị chặn nhất)
 app.get('/api/gamepasses/:userId', async (req, res) => {
     const userId = req.params.userId;
-    console.log(`\n\n[START] BAT DAU SOI USER ID: ${userId}`);
+    console.log(`\n========== BAT DAU QUET T-SHIRT CHO USER: ${userId} ==========`);
     
-    let logs = []; // Lưu lại log để trả về cho client xem luôn
-
-    function log(msg) {
-        console.log(msg);
-        logs.push(msg);
-    }
-
     try {
-        // BƯỚC 1: LẤY DANH SÁCH GAME
-        // Mình bỏ filter Public đi để xem nó có tìm thấy game Private không
-        const gamesUrl = `https://games.roblox.com/v2/users/${userId}/games?limit=50`; 
-        log(`1. Goi API lay danh sach Game: ${gamesUrl}`);
+        // Goi API Catalog de tim quan ao duoc tao boi User ID nay
+        // category=3 la Clothing, sortType=5 la moi nhat
+        const clothingUrl = `https://catalog.roblox.com/v1/search/items?category=3&creatorTargetId=${userId}&limit=100&sortType=5`;
         
-        const gamesResponse = await axios.get(gamesUrl);
-        const games = gamesResponse.data.data;
+        const clothingResponse = await axios.get(clothingUrl);
+        const clothes = clothingResponse.data.data || [];
 
-        if (!games || games.length === 0) {
-            log("❌ KET QUA: Roblox bao User nay khong co game nao ca (Rong).");
-            return res.json({ success: true, count: 0, logs: logs });
-        }
+        // Chuyen doi ket qua
+        const forSaleItems = clothes
+            .filter(c => c.price && c.price > 0) // Loc nhung mon dang ban
+            .map(c => ({
+                id: c.id,
+                name: "[ITEM] " + c.name, // Danh dau la Item
+                price: c.price,
+                imageId: c.id,
+                type: "Clothing" // Loai de Client biet cach mua
+            }));
 
-        log(`✅ TIM THAY: ${games.length} Game.`);
+        console.log(`=> KET QUA: Tim thay tong cong ${forSaleItems.length} vat pham. `);
 
-        let allPasses = [];
-
-        // BƯỚC 2: DUYỆT TỪNG GAME (BỎ TRY-CATCH ĐỂ HIỆN LỖI)
-        for (const game of games) {
-            log(`------------------------------------------------`);
-            log(`➡️ DANG KIEM TRA GAME: [${game.name}] (UniverseID: ${game.id})`);
-            
-            // Link lấy Gamepass
-            const passUrl = `https://games.roblox.com/v1/games/${game.id}/game-passes?limit=100`;
-            
-            try {
-                const passResponse = await axios.get(passUrl);
-                const passes = passResponse.data.data;
-
-                if (passes.length === 0) {
-                    log(`   ⚠️ Game nay khong co Gamepass nao.`);
-                } else {
-                    log(`   ✅ Game nay co ${passes.length} Gamepass raw:`);
-                    passes.forEach(p => {
-                        log(`      - Ten: ${p.name} | Gia: ${p.price} | ID: ${p.id}`);
-                    });
-                }
-
-                // Map dữ liệu
-                const mapped = passes.map(p => ({
-                    id: p.id,
-                    name: p.name,
-                    price: p.price,
-                    imageId: p.id,
-                    gameName: game.name
-                }));
-                allPasses = allPasses.concat(mapped);
-
-            } catch (err) {
-                // IN RA LỖI CỤ THỂ NẾU ROBLOX CHẶN
-                log(`   ❌ LOI KHI GOI API GAMEPASS: ${err.message}`);
-                if (err.response) {
-                    log(`   status: ${err.response.status} - ${err.response.statusText}`);
-                }
-            }
-        }
-
-        // BƯỚC 3: KẾT QUẢ
-        const validPasses = allPasses.filter(p => p.price && p.price > 0);
-        log(`\n[KET THUC] Tong tim thay: ${validPasses.length} Gamepass ban duoc.`);
-
-        res.json({ 
-            success: true, 
-            count: validPasses.length, 
-            data: validPasses,
-            debug_logs: logs 
-        });
+        res.json({ success: true, count: forSaleItems.length, data: forSaleItems });
 
     } catch (error) {
-        log("❌ LOI SERVER FATAL: " + error.message);
-        res.json({ success: false, error: error.message, logs: logs });
+        console.error("LOI API CATALOG:", error.message);
+        // Tra ve ket qua 0 neu gap loi
+        res.status(200).json({ success: true, count: 0, data: [] });
     }
 });
 
